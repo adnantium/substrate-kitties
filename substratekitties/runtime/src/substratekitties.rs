@@ -1,5 +1,5 @@
 use support::{decl_storage, decl_module, StorageValue, StorageMap,
-    dispatch::Result, ensure};
+    dispatch::Result, ensure, decl_event};
 use system::ensure_signed;
 use runtime_primitives::traits::{As, Hash};
 use parity_codec::{Encode, Decode};
@@ -12,25 +12,42 @@ pub struct Kitty<Hash, Balance> {
     gen: u64,
 }
 
-pub trait Trait: balances::Trait {}
+pub trait Trait: balances::Trait {
+    type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+}
+
+decl_event!(
+    pub enum Event<T>
+    where
+        <T as system::Trait>::AccountId,
+        <T as system::Trait>::Hash
+    {
+        Created(AccountId, Hash),
+    }
+);
 
 decl_storage! {
     trait Store for Module<T: Trait> as KittyStorage {
         Kitties get(kitty): map T::Hash => Kitty<T::Hash, T::Balance>;
-        KittyOwner get(kitty_owner): map T::Hash => Option<T::AccountId>;
+        KittyOwner get(owner_of): map T::Hash => Option<T::AccountId>;
         OwnedKitty get(kitty_of_owner): map T::AccountId => T::Hash;
+
         Nonce: u64;
     }
 }
 
 decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
+
+        fn deposit_event<T>() = default;
+
         fn create_kitty(origin) -> Result {
             let sender = ensure_signed(origin)?;
 
             let nonce = <Nonce<T>>::get();
-            let random_seed = <system::Module<T>>::random_seed();
-            let random_hash = (random_seed, sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
+            let random_hash = (<system::Module<T>>::random_seed(), &sender, nonce)
+                .using_encoded(<T as system::Trait>::Hashing::hash);
+
             ensure!(!<KittyOwner<T>>::exists(random_hash), "Kitty already exists");
 
             let new_kitty = Kitty {
@@ -40,11 +57,13 @@ decl_module! {
                 gen: 0,
             };
 
-            <Kitties<T>>::insert(new_kitty.id, &new_kitty);
-            <KittyOwner<T>>::insert(new_kitty.id, &sender);
-            <OwnedKitty<T>>::insert(&sender, new_kitty.id);
+            <Kitties<T>>::insert(random_hash, new_kitty);
+            <KittyOwner<T>>::insert(random_hash, &sender);
+            <OwnedKitty<T>>::insert(&sender, random_hash);
 
             <Nonce<T>>::mutate(|n| *n += 1);
+
+            Self::deposit_event(RawEvent::Created(sender, random_hash));
 
             Ok(())
         }
