@@ -20,9 +20,11 @@ decl_event!(
     pub enum Event<T>
     where
         <T as system::Trait>::AccountId,
-        <T as system::Trait>::Hash
+        <T as system::Trait>::Hash,
+        <T as balances::Trait>::Balance
     {
         Created(AccountId, Hash),
+        PriceSet(AccountId, Hash, Balance),
     }
 );
 
@@ -67,6 +69,24 @@ decl_module! {
 
             Ok(())
         }
+
+        fn set_price(origin, kitty_id: T::Hash, new_price: T::Balance) -> Result {
+            let sender = ensure_signed(origin)?;
+
+            ensure!(<Kitties<T>>::exists(kitty_id), "This cat does not exist");
+
+            let owner = Self::owner_of(kitty_id).ok_or("No owner for this kitty")?;
+            ensure!(owner == sender, "You do not own this cat");
+
+            let mut kitty = Self::kitty(kitty_id);
+            kitty.price = new_price;
+
+            <Kitties<T>>::insert(kitty_id, kitty);
+
+            Self::deposit_event(RawEvent::PriceSet(sender, kitty_id, new_price));
+
+            Ok(())
+        }
     }
 }
 
@@ -80,7 +100,7 @@ impl<T: Trait> Module<T> {
             .ok_or("Overflow adding a new kitty to account balance")?;
 
         let all_kitties_count = Self::all_kitties_count();
-        
+
         let new_all_kitties_count = all_kitties_count.checked_add(1)
             .ok_or("Overflow adding a new kitty to total supply")?;
 
